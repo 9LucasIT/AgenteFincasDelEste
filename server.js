@@ -546,6 +546,186 @@ app.get('/', (req, res) => {
   });
 });
 
+
+// === ENDPOINT TEMPORAL DE ONBOARDING ===
+app.post('/admin/onboard', async (req, res) => {
+  try {
+    console.log('🚀 Iniciando onboarding de Fincas del Este...');
+
+    const fincasClient = await Client.findOneAndUpdate(
+      { whatsappNumber: '+59898254663' },
+      {
+        name: 'Fincas del Este',
+        whatsappNumber: '+59898254663',
+        country: 'Uruguay',
+        isActive: true,
+        config: {
+          operationType: ['Venta', 'Alquiler Temporario', 'Alquiler Anual'],
+          currency: 'USD',
+          features: {
+            infocasasIntegration: true,
+            leadQualification: true,
+            autoResponse: true
+          }
+        }
+      },
+      { upsert: true, new: true }
+    );
+
+    console.log('✅ Cliente creado:', fincasClient._id);
+
+    const properties = [
+      {
+        clientId: fincasClient._id,
+        reference: '2125',
+        tipo: 'Apartamento',
+        ubicacion: 'La Barra',
+        precio: 350000,
+        operacion: 'Venta',
+        dormitorios: 3,
+        banos: 3,
+        superficie: 120,
+        descripcion: 'Moderno apartamento en La Barra con vista al mar',
+        isActive: true
+      },
+      {
+        clientId: fincasClient._id,
+        reference: '3456',
+        tipo: 'Casa',
+        ubicacion: 'José Ignacio',
+        precio: 18000,
+        operacion: 'Alquiler Temporario',
+        dormitorios: 4,
+        banos: 3,
+        superficie: 200,
+        descripcion: 'Casa con piscina, ideal para familias',
+        isActive: true,
+        alquilerInfo: {
+          periodo: 'Enero-Febrero',
+          serviciosIncluidos: ['WiFi', 'Piscina', 'Parrillero']
+        }
+      },
+      {
+        clientId: fincasClient._id,
+        reference: '7890',
+        tipo: 'Apartamento',
+        ubicacion: 'Punta del Este Centro',
+        precio: 1200,
+        operacion: 'Alquiler Anual',
+        dormitorios: 2,
+        banos: 1,
+        superficie: 65,
+        descripcion: 'Céntrico, cerca de todos los servicios',
+        isActive: true,
+        alquilerInfo: {
+          periodo: 'Anual',
+          expensas: 150,
+          aceptaMascotas: true
+        }
+      },
+      {
+        clientId: fincasClient._id,
+        reference: '4521',
+        tipo: 'Casa',
+        ubicacion: 'Manantiales',
+        precio: 580000,
+        operacion: 'Venta',
+        dormitorios: 5,
+        banos: 4,
+        superficie: 280,
+        descripcion: 'Casa de lujo con quincho y piscina climatizada',
+        isActive: true
+      },
+      {
+        clientId: fincasClient._id,
+        reference: '6789',
+        tipo: 'Apartamento',
+        ubicacion: 'Punta del Este Playa Brava',
+        precio: 22000,
+        operacion: 'Alquiler Temporario',
+        dormitorios: 3,
+        banos: 2,
+        superficie: 95,
+        descripcion: 'Frente al mar, vista panorámica',
+        isActive: true,
+        alquilerInfo: {
+          periodo: 'Enero',
+          serviciosIncluidos: ['WiFi', 'Cochera']
+        }
+      },
+      {
+        clientId: fincasClient._id,
+        reference: '9012',
+        tipo: 'Casa',
+        ubicacion: 'La Barra',
+        precio: 1800,
+        operacion: 'Alquiler Anual',
+        dormitorios: 3,
+        banos: 2,
+        superficie: 150,
+        descripcion: 'Con jardín y parrillero',
+        isActive: true,
+        alquilerInfo: {
+          periodo: 'Anual',
+          expensas: 200,
+          garaje: true
+        }
+      },
+      {
+        clientId: fincasClient._id,
+        reference: '3344',
+        tipo: 'Terreno',
+        ubicacion: 'José Ignacio',
+        precio: 180000,
+        operacion: 'Venta',
+        superficie: 1000,
+        descripcion: 'Terreno esquina, zona premium',
+        isActive: true
+      },
+      {
+        clientId: fincasClient._id,
+        reference: '5566',
+        tipo: 'Apartamento',
+        ubicacion: 'Punta del Este Puerto',
+        precio: 14000,
+        operacion: 'Alquiler Temporario',
+        dormitorios: 2,
+        banos: 2,
+        superficie: 75,
+        descripcion: 'A pasos del puerto y restaurantes',
+        isActive: true,
+        alquilerInfo: {
+          periodo: 'Febrero',
+          serviciosIncluidos: ['WiFi', 'Cochera', 'Amenities']
+        }
+      }
+    ];
+
+    await Property.deleteMany({ clientId: fincasClient._id });
+    const insertedProps = await Property.insertMany(properties);
+    console.log(`✅ ${insertedProps.length} propiedades agregadas`);
+
+    res.json({
+      success: true,
+      message: '✅ Fincas del Este configurado correctamente',
+      data: {
+        clientId: fincasClient._id,
+        whatsapp: fincasClient.whatsappNumber,
+        properties: insertedProps.length
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error en onboarding:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+// === FIN ENDPOINT TEMPORAL ===
+
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`
