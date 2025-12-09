@@ -239,6 +239,7 @@ app.post('/admin/upload-properties', async (req, res) => {
 });
 
 // Webhook de Green API
+// Webhook de Green API
 app.post('/webhook/:instanceId', async (req, res) => {
   try {
     const { instanceId } = req.params;
@@ -305,11 +306,31 @@ app.post('/webhook/:instanceId', async (req, res) => {
       const properties = await Property.find({ 
         clientId: client._id,
         isActive: true 
-      });
+      }).limit(10); // Solo primeras 10 para no sobrecargar
 
       console.log(`📦 Propiedades encontradas: ${properties.length}`);
 
-      const systemPrompt = generateSystemPrompt(client, properties);
+      // Crear un resumen simple de propiedades para el prompt
+      const propSummary = properties.map(p => 
+        `${p.tipo} en ${p.ubicacion}, ${p.operacion}, ${p.dormitorios} dorm, U$S ${p.precio.toLocaleString()}`
+      ).join('\n');
+
+      const systemPrompt = `Eres un agente inmobiliario profesional de ${client.name} en ${client.country}.
+
+Propiedades disponibles (${properties.length} en total):
+${propSummary}
+
+INSTRUCCIONES:
+1. Saluda y pregunta: "¿Estás buscando COMPRAR o ALQUILAR?"
+2. Si alquilar: "¿Para TEMPORADA o ANUAL?"
+3. Califica al cliente preguntando zona, presupuesto, dormitorios
+4. Cuando esté calificado di: "Te conecto con un asesor"
+
+IMPORTANTE:
+- Respuestas MUY BREVES (máximo 2 líneas)
+- Lenguaje uruguayo natural
+- Precios: "U$S 350.000"`;
+
       const conversationHistory = conversation.messages.map(msg => ({
         role: msg.role,
         content: msg.content
@@ -321,7 +342,7 @@ app.post('/webhook/:instanceId', async (req, res) => {
         'https://api.anthropic.com/v1/messages',
         {
           model: 'claude-3-5-sonnet-20241022',
-          max_tokens: 1000,
+          max_tokens: 500,
           system: systemPrompt,
           messages: conversationHistory
         },
@@ -361,61 +382,9 @@ app.post('/webhook/:instanceId', async (req, res) => {
     }
 
   } catch (error) {
-    console.error('❌ Error en webhook:', error);
-    console.error('❌ Error stack:', error.stack);
+    console.error('❌ Error en webhook:', error.message);
+    if (error.response) {
+      console.error('❌ API Response:', error.response.data);
+    }
   }
-});
-
-function generateSystemPrompt(client, properties) {
-  return `Eres un agente inmobiliario profesional de ${client.name} en ${client.country}.
-
-PROPIEDADES DISPONIBLES:
-${JSON.stringify(properties.slice(0, 50), null, 2)}
-
-Total de propiedades: ${properties.length}
-
-TU TRABAJO:
-1. Saluda cordialmente y preséntate como asistente de ${client.name}
-2. Primera pregunta: "¿Estás buscando COMPRAR o ALQUILAR?"
-   - Si alquilar: "¿Para TEMPORADA (enero/febrero) o ANUAL (contrato 2 años)?"
-3. Pregunta: "¿Ya tenés alguna propiedad vista (link o dirección)?"
-4. Si tiene propiedad vista: Identificar y ofrecer coordinar visita
-5. Si busca asesoramiento: Calificar según operación
-
-PREGUNTAS DE CALIFICACIÓN:
-- VENTAS: zona, presupuesto USD, tipo, dormitorios, para vivir/inversión
-- ALQUILERES TEMPORARIOS: período, personas, zona, presupuesto, servicios
-- ALQUILERES ANUALES: presupuesto mensual USD, zona, dormitorios, garaje, mascotas
-
-CUANDO CALIFICADO: "Perfecto, te voy a conectar con uno de nuestros asesores"
-
-IMPORTANTE:
-- Respuestas BREVES (2-3 líneas)
-- Lenguaje uruguayo natural
-- Precios formato: "U$S 350.000" (venta), "U$S 18.000 por Enero" (temporario), "U$S 1.200 por mes" (anual)
-- Si preguntan por propiedad que no existe, ofrecer alternativas similares`;
-}
-
-async function sendWhatsAppMessage(instanceId, token, phoneNumber, message) {
-  try {
-    const url = `https://api.green-api.com/waInstance${instanceId}/sendMessage/${token}`;
-    
-    await axios.post(url, {
-      chatId: `${phoneNumber}@c.us`,
-      message: message
-    });
-
-    console.log(`✅ Mensaje enviado a ${phoneNumber}`);
-  } catch (error) {
-    console.error('❌ Error enviando mensaje:', error.response?.data || error.message);
-    throw error;
-  }
-}
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`✅ PulseTrack Server corriendo en puerto ${PORT}`);
-  console.log(`📞 Sistema listo para Fincas del Este`);
-  console.log(`\n🔗 Webhook URL:`);
-  console.log(`https://agentefincasdeleste-production.up.railway.app/webhook/{instanceId}`);
 });
