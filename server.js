@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const axios = require('axios');
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 
 // Modelos
 const clientSchema = new mongoose.Schema({
@@ -62,8 +62,8 @@ app.get('/test', (req, res) => {
   res.json({ message: 'Server is working!' });
 });
 
-// === ENDPOINT TEMPORAL DE ONBOARDING ===
-app.post('/admin/onboard', async (req, res) => {
+// === ENDPOINT DE ONBOARDING ===
+app.get('/admin/onboard', async (req, res) => {
   try {
     console.log('🚀 Iniciando onboarding de Fincas del Este...');
 
@@ -121,100 +121,6 @@ app.post('/admin/onboard', async (req, res) => {
           periodo: 'Enero-Febrero',
           serviciosIncluidos: ['WiFi', 'Piscina', 'Parrillero']
         }
-      },
-      {
-        clientId: fincasClient._id,
-        reference: '7890',
-        tipo: 'Apartamento',
-        ubicacion: 'Punta del Este Centro',
-        precio: 1200,
-        operacion: 'Alquiler Anual',
-        dormitorios: 2,
-        banos: 1,
-        superficie: 65,
-        descripcion: 'Céntrico, cerca de todos los servicios',
-        isActive: true,
-        alquilerInfo: {
-          periodo: 'Anual',
-          expensas: 150,
-          aceptaMascotas: true
-        }
-      },
-      {
-        clientId: fincasClient._id,
-        reference: '4521',
-        tipo: 'Casa',
-        ubicacion: 'Manantiales',
-        precio: 580000,
-        operacion: 'Venta',
-        dormitorios: 5,
-        banos: 4,
-        superficie: 280,
-        descripcion: 'Casa de lujo con quincho y piscina climatizada',
-        isActive: true
-      },
-      {
-        clientId: fincasClient._id,
-        reference: '6789',
-        tipo: 'Apartamento',
-        ubicacion: 'Punta del Este Playa Brava',
-        precio: 22000,
-        operacion: 'Alquiler Temporario',
-        dormitorios: 3,
-        banos: 2,
-        superficie: 95,
-        descripcion: 'Frente al mar, vista panorámica',
-        isActive: true,
-        alquilerInfo: {
-          periodo: 'Enero',
-          serviciosIncluidos: ['WiFi', 'Cochera']
-        }
-      },
-      {
-        clientId: fincasClient._id,
-        reference: '9012',
-        tipo: 'Casa',
-        ubicacion: 'La Barra',
-        precio: 1800,
-        operacion: 'Alquiler Anual',
-        dormitorios: 3,
-        banos: 2,
-        superficie: 150,
-        descripcion: 'Con jardín y parrillero',
-        isActive: true,
-        alquilerInfo: {
-          periodo: 'Anual',
-          expensas: 200,
-          garaje: true
-        }
-      },
-      {
-        clientId: fincasClient._id,
-        reference: '3344',
-        tipo: 'Terreno',
-        ubicacion: 'José Ignacio',
-        precio: 180000,
-        operacion: 'Venta',
-        superficie: 1000,
-        descripcion: 'Terreno esquina, zona premium',
-        isActive: true
-      },
-      {
-        clientId: fincasClient._id,
-        reference: '5566',
-        tipo: 'Apartamento',
-        ubicacion: 'Punta del Este Puerto',
-        precio: 14000,
-        operacion: 'Alquiler Temporario',
-        dormitorios: 2,
-        banos: 2,
-        superficie: 75,
-        descripcion: 'A pasos del puerto y restaurantes',
-        isActive: true,
-        alquilerInfo: {
-          periodo: 'Febrero',
-          serviciosIncluidos: ['WiFi', 'Cochera', 'Amenities']
-        }
       }
     ];
 
@@ -228,6 +134,7 @@ app.post('/admin/onboard', async (req, res) => {
       data: {
         clientId: fincasClient._id,
         whatsapp: fincasClient.whatsappNumber,
+        greenApiInstanceId: fincasClient.greenApiInstanceId,
         properties: insertedProps.length
       }
     });
@@ -240,7 +147,96 @@ app.post('/admin/onboard', async (req, res) => {
     });
   }
 });
-// === FIN ENDPOINT TEMPORAL ===
+
+// === ENDPOINT PARA CARGAR PROPIEDADES DESDE CSV ===
+app.post('/admin/upload-properties', async (req, res) => {
+  try {
+    console.log('📊 Iniciando carga masiva de propiedades...');
+
+    const client = await Client.findOne({ name: 'Fincas del Este' });
+    
+    if (!client) {
+      return res.status(404).json({
+        success: false,
+        error: 'Cliente Fincas del Este no encontrado. Ejecutá /admin/onboard primero.'
+      });
+    }
+
+    console.log('✅ Cliente encontrado:', client._id);
+
+    const csvProperties = req.body.properties;
+
+    if (!csvProperties || !Array.isArray(csvProperties)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Falta el array de propiedades en el body'
+      });
+    }
+
+    await Property.deleteMany({ clientId: client._id });
+    console.log('🗑️ Propiedades anteriores eliminadas');
+
+    const properties = csvProperties
+      .filter(p => p.activo === '1')
+      .map(p => {
+        let operacion = '';
+        if (p.negocio && p.negocio.toLowerCase().includes('vent')) {
+          operacion = 'Venta';
+        } else if (p.negocio && p.negocio.toLowerCase().includes('alquil')) {
+          if (p.tiempo === 'anual') {
+            operacion = 'Alquiler Anual';
+          } else {
+            operacion = 'Alquiler Temporario';
+          }
+        }
+
+        let precio = 0;
+        if (operacion === 'Venta' && p.precioventa) {
+          precio = parseInt(p.precioventa) || 0;
+        } else if (operacion.includes('Alquiler') && p.precioalquiler) {
+          precio = parseInt(p.precioalquiler) || 0;
+        }
+
+        return {
+          clientId: client._id,
+          reference: p.id || '',
+          tipo: p.tipo || 'Apartamento',
+          ubicacion: `${p.barrio || p.localidad || p.ciudad || ''}`.trim(),
+          precio: precio,
+          operacion: operacion,
+          dormitorios: parseInt(p.dormitorio) || 0,
+          banos: parseInt(p.banio) || 0,
+          superficie: parseInt(p.supConstruida || p.supPropia) || 0,
+          descripcion: (p.Descripción || p.nombre || '').substring(0, 500),
+          isActive: true,
+          alquilerInfo: operacion.includes('Alquiler') ? {
+            periodo: p.tiempo || '',
+            serviciosIncluidos: []
+          } : undefined
+        };
+      })
+      .filter(p => p.precio > 0 && p.operacion);
+
+    const insertedProps = await Property.insertMany(properties);
+    console.log(`✅ ${insertedProps.length} propiedades cargadas`);
+
+    res.json({
+      success: true,
+      message: `✅ ${insertedProps.length} propiedades cargadas correctamente`,
+      data: {
+        clientId: client._id,
+        properties: insertedProps.length
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error cargando propiedades:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
 
 // Webhook de Green API
 app.post('/webhook/:instanceId', async (req, res) => {
@@ -251,20 +247,16 @@ app.post('/webhook/:instanceId', async (req, res) => {
     console.log('📨 Webhook recibido - instanceId:', instanceId);
     console.log('📨 Notification type:', notification.typeWebhook);
 
-    // Responder rápido a Green API
     res.status(200).json({ received: true });
 
-    // Procesar solo mensajes entrantes
     if (notification.typeWebhook === 'incomingMessageReceived') {
       console.log('✅ Es un mensaje entrante, procesando...');
       
       const messageData = notification.messageData;
       const senderData = notification.senderData;
       
-      // CORRECCIÓN: usar senderData.chatId
       const senderNumber = senderData.chatId.replace('@c.us', '');
       
-      // Extraer texto del mensaje
       let messageText = '';
       if (messageData.textMessageData?.textMessage) {
         messageText = messageData.textMessageData.textMessage;
@@ -274,7 +266,6 @@ app.post('/webhook/:instanceId', async (req, res) => {
 
       console.log(`💬 Mensaje de ${senderNumber}: ${messageText}`);
 
-      // Buscar cliente por instanceId
       console.log('🔍 Buscando cliente con instanceId:', instanceId);
       
       const client = await Client.findOne({ 
@@ -289,7 +280,6 @@ app.post('/webhook/:instanceId', async (req, res) => {
 
       console.log('✅ Cliente encontrado:', client.name);
 
-      // Buscar o crear conversación
       let conversation = await Conversation.findOne({
         clientId: client._id,
         phoneNumber: senderNumber
@@ -306,14 +296,12 @@ app.post('/webhook/:instanceId', async (req, res) => {
         });
       }
 
-      // Agregar mensaje del usuario
       conversation.messages.push({
         role: 'user',
         content: messageText,
         timestamp: new Date()
       });
 
-      // Obtener propiedades del cliente
       const properties = await Property.find({ 
         clientId: client._id,
         isActive: true 
@@ -321,7 +309,6 @@ app.post('/webhook/:instanceId', async (req, res) => {
 
       console.log(`📦 Propiedades encontradas: ${properties.length}`);
 
-      // Preparar contexto para Claude
       const systemPrompt = generateSystemPrompt(client, properties);
       const conversationHistory = conversation.messages.map(msg => ({
         role: msg.role,
@@ -330,7 +317,6 @@ app.post('/webhook/:instanceId', async (req, res) => {
 
       console.log('🤖 Llamando a Claude API...');
 
-      // Llamar a Claude API
       const response = await axios.post(
         'https://api.anthropic.com/v1/messages',
         {
@@ -351,7 +337,6 @@ app.post('/webhook/:instanceId', async (req, res) => {
       const assistantMessage = response.data.content[0].text;
       console.log('🤖 Respuesta de Claude:', assistantMessage);
 
-      // Guardar respuesta del asistente
       conversation.messages.push({
         role: 'assistant',
         content: assistantMessage,
@@ -363,7 +348,6 @@ app.post('/webhook/:instanceId', async (req, res) => {
 
       console.log('💾 Conversación guardada');
 
-      // Enviar mensaje por WhatsApp
       console.log('📤 Enviando mensaje por WhatsApp...');
       
       await sendWhatsAppMessage(
@@ -382,12 +366,13 @@ app.post('/webhook/:instanceId', async (req, res) => {
   }
 });
 
-// Función para generar prompt del sistema
 function generateSystemPrompt(client, properties) {
   return `Eres un agente inmobiliario profesional de ${client.name} en ${client.country}.
 
 PROPIEDADES DISPONIBLES:
-${JSON.stringify(properties, null, 2)}
+${JSON.stringify(properties.slice(0, 50), null, 2)}
+
+Total de propiedades: ${properties.length}
 
 TU TRABAJO:
 1. Saluda cordialmente y preséntate como asistente de ${client.name}
@@ -406,13 +391,11 @@ CUANDO CALIFICADO: "Perfecto, te voy a conectar con uno de nuestros asesores"
 
 IMPORTANTE:
 - Respuestas BREVES (2-3 líneas)
-- Lenguaje ${client.country === 'Uruguay' ? 'uruguayo' : 'argentino'} natural
+- Lenguaje uruguayo natural
 - Precios formato: "U$S 350.000" (venta), "U$S 18.000 por Enero" (temporario), "U$S 1.200 por mes" (anual)
-- NO inventar propiedades que no están en la base de datos
 - Si preguntan por propiedad que no existe, ofrecer alternativas similares`;
 }
 
-// Función para enviar mensaje por WhatsApp
 async function sendWhatsAppMessage(instanceId, token, phoneNumber, message) {
   try {
     const url = `https://api.green-api.com/waInstance${instanceId}/sendMessage/${token}`;
@@ -429,11 +412,10 @@ async function sendWhatsAppMessage(instanceId, token, phoneNumber, message) {
   }
 }
 
-// Iniciar servidor
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ PulseTrack Server corriendo en puerto ${PORT}`);
   console.log(`📞 Sistema listo para Fincas del Este`);
   console.log(`\n🔗 Webhook URL:`);
-  console.log(`https://agentefincsdeleste-production.up.railway.app/webhook/{instanceId}`);
+  console.log(`https://agentefincasdeleste-production.up.railway.app/webhook/{instanceId}`);
 });
