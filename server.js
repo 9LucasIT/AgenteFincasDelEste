@@ -404,7 +404,7 @@ async function sendWhatsAppMessage(instanceId, token, phoneNumber, message) {
 
 // Iniciar servidor
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ PulseTrack Server corriendo en puerto ${PORT}`);
   console.log(`📞 Sistema listo para Fincas del Este`);
   console.log(`\n🔗 Webhook URL:`);
