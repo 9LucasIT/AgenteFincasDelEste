@@ -148,97 +148,6 @@ app.get('/admin/onboard', async (req, res) => {
   }
 });
 
-// === ENDPOINT PARA CARGAR PROPIEDADES DESDE CSV ===
-app.post('/admin/upload-properties', async (req, res) => {
-  try {
-    console.log('📊 Iniciando carga masiva de propiedades...');
-
-    const client = await Client.findOne({ name: 'Fincas del Este' });
-    
-    if (!client) {
-      return res.status(404).json({
-        success: false,
-        error: 'Cliente Fincas del Este no encontrado. Ejecutá /admin/onboard primero.'
-      });
-    }
-
-    console.log('✅ Cliente encontrado:', client._id);
-
-    const csvProperties = req.body.properties;
-
-    if (!csvProperties || !Array.isArray(csvProperties)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Falta el array de propiedades en el body'
-      });
-    }
-
-    await Property.deleteMany({ clientId: client._id });
-    console.log('🗑️ Propiedades anteriores eliminadas');
-
-    const properties = csvProperties
-      .filter(p => p.activo === '1')
-      .map(p => {
-        let operacion = '';
-        if (p.negocio && p.negocio.toLowerCase().includes('vent')) {
-          operacion = 'Venta';
-        } else if (p.negocio && p.negocio.toLowerCase().includes('alquil')) {
-          if (p.tiempo === 'anual') {
-            operacion = 'Alquiler Anual';
-          } else {
-            operacion = 'Alquiler Temporario';
-          }
-        }
-
-        let precio = 0;
-        if (operacion === 'Venta' && p.precioventa) {
-          precio = parseInt(p.precioventa) || 0;
-        } else if (operacion.includes('Alquiler') && p.precioalquiler) {
-          precio = parseInt(p.precioalquiler) || 0;
-        }
-
-        return {
-          clientId: client._id,
-          reference: p.id || '',
-          tipo: p.tipo || 'Apartamento',
-          ubicacion: `${p.barrio || p.localidad || p.ciudad || ''}`.trim(),
-          precio: precio,
-          operacion: operacion,
-          dormitorios: parseInt(p.dormitorio) || 0,
-          banos: parseInt(p.banio) || 0,
-          superficie: parseInt(p.supConstruida || p.supPropia) || 0,
-          descripcion: (p.Descripción || p.nombre || '').substring(0, 500),
-          isActive: true,
-          alquilerInfo: operacion.includes('Alquiler') ? {
-            periodo: p.tiempo || '',
-            serviciosIncluidos: []
-          } : undefined
-        };
-      })
-      .filter(p => p.precio > 0 && p.operacion);
-
-    const insertedProps = await Property.insertMany(properties);
-    console.log(`✅ ${insertedProps.length} propiedades cargadas`);
-
-    res.json({
-      success: true,
-      message: `✅ ${insertedProps.length} propiedades cargadas correctamente`,
-      data: {
-        clientId: client._id,
-        properties: insertedProps.length
-      }
-    });
-
-  } catch (error) {
-    console.error('❌ Error cargando propiedades:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-// Webhook de Green API
 // Webhook de Green API
 app.post('/webhook/:instanceId', async (req, res) => {
   try {
@@ -246,12 +155,11 @@ app.post('/webhook/:instanceId', async (req, res) => {
     const notification = req.body;
 
     console.log('📨 Webhook recibido - instanceId:', instanceId);
-    console.log('📨 Notification type:', notification.typeWebhook);
 
     res.status(200).json({ received: true });
 
     if (notification.typeWebhook === 'incomingMessageReceived') {
-      console.log('✅ Es un mensaje entrante, procesando...');
+      console.log('✅ Procesando mensaje...');
       
       const messageData = notification.messageData;
       const senderData = notification.senderData;
@@ -265,21 +173,19 @@ app.post('/webhook/:instanceId', async (req, res) => {
         messageText = messageData.extendedTextMessageData.text;
       }
 
-      console.log(`💬 Mensaje de ${senderNumber}: ${messageText}`);
+      console.log(`💬 De ${senderNumber}: ${messageText}`);
 
-      console.log('🔍 Buscando cliente con instanceId:', instanceId);
-      
       const client = await Client.findOne({ 
         greenApiInstanceId: instanceId.toString(),
         isActive: true 
       });
 
       if (!client) {
-        console.log('⚠️ Cliente no encontrado para instance:', instanceId);
+        console.log('⚠️ Cliente no encontrado');
         return;
       }
 
-      console.log('✅ Cliente encontrado:', client.name);
+      console.log('✅ Cliente:', client.name);
 
       let conversation = await Conversation.findOne({
         clientId: client._id,
@@ -287,7 +193,6 @@ app.post('/webhook/:instanceId', async (req, res) => {
       });
 
       if (!conversation) {
-        console.log('📝 Creando nueva conversación...');
         conversation = new Conversation({
           clientId: client._id,
           phoneNumber: senderNumber,
@@ -306,45 +211,39 @@ app.post('/webhook/:instanceId', async (req, res) => {
       const properties = await Property.find({ 
         clientId: client._id,
         isActive: true 
-      }).limit(10); // Solo primeras 10 para no sobrecargar
+      }).limit(5);
 
-      console.log(`📦 Propiedades encontradas: ${properties.length}`);
+      console.log(`📦 Propiedades: ${properties.length}`);
 
-      // Crear un resumen simple de propiedades para el prompt
-      const propSummary = properties.map(p => 
-        `${p.tipo} en ${p.ubicacion}, ${p.operacion}, ${p.dormitorios} dorm, U$S ${p.precio.toLocaleString()}`
-      ).join('\n');
+      const propList = properties.map(p => 
+        `${p.tipo} ${p.ubicacion} ${p.dormitorios}d U$S${p.precio}`
+      ).join(', ');
 
-      const systemPrompt = `Eres un agente inmobiliario profesional de ${client.name} en ${client.country}.
+      const systemPrompt = `Sos un agente de Fincas del Este (Uruguay).
 
-Propiedades disponibles (${properties.length} en total):
-${propSummary}
+Propiedades: ${propList}
 
-INSTRUCCIONES:
-1. Saluda y pregunta: "¿Estás buscando COMPRAR o ALQUILAR?"
-2. Si alquilar: "¿Para TEMPORADA o ANUAL?"
-3. Califica al cliente preguntando zona, presupuesto, dormitorios
-4. Cuando esté calificado di: "Te conecto con un asesor"
+Reglas:
+- Respuestas MUY cortas (1-2 lineas)
+- Pregunta: comprar o alquilar?
+- Si alquila: temporario o anual?
+- Califica: zona, presupuesto, dormitorios
+- Al final: "te conecto con un asesor"`;
 
-IMPORTANTE:
-- Respuestas MUY BREVES (máximo 2 líneas)
-- Lenguaje uruguayo natural
-- Precios: "U$S 350.000"`;
-
-      const conversationHistory = conversation.messages.map(msg => ({
-        role: msg.role,
-        content: msg.content
+      const messages = conversation.messages.map(m => ({
+        role: m.role,
+        content: m.content
       }));
 
-      console.log('🤖 Llamando a Claude API...');
+      console.log('🤖 Llamando Claude...');
 
       const response = await axios.post(
         'https://api.anthropic.com/v1/messages',
         {
           model: 'claude-3-5-sonnet-20241022',
-          max_tokens: 500,
+          max_tokens: 300,
           system: systemPrompt,
-          messages: conversationHistory
+          messages: messages
         },
         {
           headers: {
@@ -355,36 +254,53 @@ IMPORTANTE:
         }
       );
 
-      const assistantMessage = response.data.content[0].text;
-      console.log('🤖 Respuesta de Claude:', assistantMessage);
+      const reply = response.data.content[0].text;
+      console.log('🤖 Respuesta:', reply);
 
       conversation.messages.push({
         role: 'assistant',
-        content: assistantMessage,
+        content: reply,
         timestamp: new Date()
       });
 
       conversation.updatedAt = new Date();
       await conversation.save();
 
-      console.log('💾 Conversación guardada');
-
-      console.log('📤 Enviando mensaje por WhatsApp...');
-      
       await sendWhatsAppMessage(
         client.greenApiInstanceId,
         client.greenApiToken,
         senderNumber,
-        assistantMessage
+        reply
       );
 
-      console.log('✅ Proceso completado exitosamente');
+      console.log('✅ Enviado');
     }
 
   } catch (error) {
-    console.error('❌ Error en webhook:', error.message);
-    if (error.response) {
-      console.error('❌ API Response:', error.response.data);
+    console.error('❌ Error webhook:', error.message);
+    if (error.response?.data) {
+      console.error('API Error:', JSON.stringify(error.response.data));
     }
   }
+});
+
+async function sendWhatsAppMessage(instanceId, token, phoneNumber, message) {
+  try {
+    const url = `https://api.green-api.com/waInstance${instanceId}/sendMessage/${token}`;
+    
+    await axios.post(url, {
+      chatId: `${phoneNumber}@c.us`,
+      message: message
+    });
+
+    console.log(`✅ Enviado a ${phoneNumber}`);
+  } catch (error) {
+    console.error('❌ Error WhatsApp:', error.message);
+  }
+}
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`✅ Server en puerto ${PORT}`);
+  console.log(`🔗 Webhook: https://agentefincasdeleste-production.up.railway.app/webhook/{instanceId}`);
 });
