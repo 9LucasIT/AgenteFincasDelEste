@@ -6,20 +6,11 @@ const axios = require('axios');
 const app = express();
 app.use(express.json({ limit: '50mb' }));
 
-// Modelos
-const clientSchema = new mongoose.Schema({
-  name: String,
-  whatsappNumber: String,
-  greenApiInstanceId: String,
-  greenApiToken: String,
-  country: String,
-  isActive: Boolean,
-  config: Object,
-  createdAt: { type: Date, default: Date.now }
-});
+// ============================================
+// MODELOS DE MONGODB (Solo propiedades y conversaciones)
+// ============================================
 
 const propertySchema = new mongoose.Schema({
-  clientId: mongoose.Schema.Types.ObjectId,
   reference: String,
   tipo: String,
   ubicacion: String,
@@ -29,13 +20,11 @@ const propertySchema = new mongoose.Schema({
   banos: Number,
   superficie: Number,
   descripcion: String,
-  isActive: Boolean,
-  alquilerInfo: Object,
+  isActive: { type: Boolean, default: true },
   createdAt: { type: Date, default: Date.now }
 });
 
 const conversationSchema = new mongoose.Schema({
-  clientId: mongoose.Schema.Types.ObjectId,
   phoneNumber: String,
   messages: [{
     role: String,
@@ -48,7 +37,6 @@ const conversationSchema = new mongoose.Schema({
   updatedAt: { type: Date, default: Date.now }
 });
 
-const Client = mongoose.model('Client', clientSchema);
 const Property = mongoose.model('Property', propertySchema);
 const Conversation = mongoose.model('Conversation', conversationSchema);
 
@@ -57,90 +45,66 @@ mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('✅ MongoDB conectado'))
   .catch(err => console.error('❌ Error MongoDB:', err));
 
-// Endpoint de test
+// ============================================
+// ENDPOINTS
+// ============================================
+
+// Test endpoint
 app.get('/test', (req, res) => {
   res.json({ message: 'Server is working!' });
 });
 
-// === ENDPOINT DE ONBOARDING ===
-app.get('/admin/onboard', async (req, res) => {
+// Cargar propiedades masivamente
+app.post('/admin/upload-properties', async (req, res) => {
   try {
-    console.log('🚀 Iniciando onboarding de Fincas del Este...');
+    console.log('📊 Iniciando carga masiva de propiedades...');
 
-    const fincasClient = await Client.findOneAndUpdate(
-      { whatsappNumber: '+59898254663' },
-      {
-        name: 'Fincas del Este',
-        whatsappNumber: '+59898254663',
-        greenApiInstanceId: process.env.GREEN_API_INSTANCE_ID,
-        greenApiToken: process.env.GREEN_API_TOKEN,
-        country: 'Uruguay',
-        isActive: true,
-        config: {
-          operationType: ['Venta', 'Alquiler Temporario', 'Alquiler Anual'],
-          currency: 'USD',
-          features: {
-            infocasasIntegration: true,
-            leadQualification: true,
-            autoResponse: true
-          }
-        }
-      },
-      { upsert: true, new: true }
-    );
+    const csvProperties = req.body.properties;
 
-    console.log('✅ Cliente creado:', fincasClient._id);
+    if (!csvProperties || !Array.isArray(csvProperties)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Falta el array de propiedades en el body'
+      });
+    }
 
-    const properties = [
-      {
-        clientId: fincasClient._id,
-        reference: '2125',
-        tipo: 'Apartamento',
-        ubicacion: 'La Barra',
-        precio: 350000,
-        operacion: 'Venta',
-        dormitorios: 3,
-        banos: 3,
-        superficie: 120,
-        descripcion: 'Moderno apartamento en La Barra con vista al mar',
+    // IMPORTANTE: NO borrar propiedades existentes, solo agregar nuevas
+    console.log('📦 Procesando propiedades...');
+
+    const properties = csvProperties.map(p => {
+      const dormitorios = parseInt(p.dormitorio) || 0;
+      const banos = parseInt(p.banio) || 0;
+      const superficie = parseInt(p.supConstruida) || 0;
+
+      return {
+        reference: p.id || '',
+        tipo: p.tipo || 'Apartamento',
+        ubicacion: p.ubicacion || '',
+        precio: p.precio || 0,
+        operacion: p.negocio || '',
+        dormitorios: dormitorios,
+        banos: banos,
+        superficie: superficie,
+        descripcion: (p.Descripción || '').substring(0, 500),
         isActive: true
-      },
-      {
-        clientId: fincasClient._id,
-        reference: '3456',
-        tipo: 'Casa',
-        ubicacion: 'José Ignacio',
-        precio: 18000,
-        operacion: 'Alquiler Temporario',
-        dormitorios: 4,
-        banos: 3,
-        superficie: 200,
-        descripcion: 'Casa con piscina, ideal para familias',
-        isActive: true,
-        alquilerInfo: {
-          periodo: 'Enero-Febrero',
-          serviciosIncluidos: ['WiFi', 'Piscina', 'Parrillero']
-        }
-      }
-    ];
+      };
+    }).filter(p => p.precio > 0 && p.operacion);
 
-    await Property.deleteMany({ clientId: fincasClient._id });
+    // Borrar propiedades existentes y cargar las nuevas
+    await Property.deleteMany({});
     const insertedProps = await Property.insertMany(properties);
-    console.log(`✅ ${insertedProps.length} propiedades agregadas`);
+    console.log(`✅ ${insertedProps.length} propiedades cargadas`);
 
     res.json({
       success: true,
-      message: '✅ Fincas del Este configurado correctamente',
+      message: `✅ ${insertedProps.length} propiedades cargadas correctamente`,
       data: {
-        clientId: fincasClient._id,
-        whatsapp: fincasClient.whatsappNumber,
-        greenApiInstanceId: fincasClient.greenApiInstanceId,
         properties: insertedProps.length
       }
     });
 
   } catch (error) {
-    console.error('❌ Error en onboarding:', error);
+    console.error('❌ Error cargando propiedades:', error);
     res.status(500).json({
       success: false,
       error: error.message
@@ -148,13 +112,39 @@ app.get('/admin/onboard', async (req, res) => {
   }
 });
 
-// Webhook de Green API
+// Ver estadísticas de propiedades
+app.get('/admin/stats', async (req, res) => {
+  try {
+    const total = await Property.countDocuments();
+    const ventas = await Property.countDocuments({ operacion: 'Venta' });
+    const alquileres = await Property.countDocuments({ 
+      operacion: { $regex: 'Alquiler', $options: 'i' } 
+    });
+
+    res.json({
+      success: true,
+      data: {
+        total,
+        ventas,
+        alquileres,
+        conversaciones: await Conversation.countDocuments()
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ============================================
+// WEBHOOK DE GREEN API
+// ============================================
+
 app.post('/webhook/:instanceId', async (req, res) => {
   try {
     const { instanceId } = req.params;
     const notification = req.body;
 
-    console.log('📨 Webhook recibido - instanceId:', instanceId);
+    console.log('📨 Webhook recibido');
 
     res.status(200).json({ received: true });
 
@@ -175,26 +165,21 @@ app.post('/webhook/:instanceId', async (req, res) => {
 
       console.log(`💬 De ${senderNumber}: ${messageText}`);
 
-      const client = await Client.findOne({ 
-        greenApiInstanceId: instanceId.toString(),
-        isActive: true 
-      });
-
-      if (!client) {
-        console.log('⚠️ Cliente no encontrado');
+      // Verificar que el instanceId coincide con el configurado
+      if (instanceId !== process.env.GREEN_API_INSTANCE_ID) {
+        console.log('⚠️ Instance ID no coincide');
         return;
       }
 
-      console.log('✅ Cliente:', client.name);
+      console.log('✅ Instance ID verificado');
 
+      // Buscar o crear conversación
       let conversation = await Conversation.findOne({
-        clientId: client._id,
         phoneNumber: senderNumber
       });
 
       if (!conversation) {
         conversation = new Conversation({
-          clientId: client._id,
           phoneNumber: senderNumber,
           messages: [],
           leadData: {},
@@ -208,20 +193,22 @@ app.post('/webhook/:instanceId', async (req, res) => {
         timestamp: new Date()
       });
 
+      // Obtener propiedades (máximo 10 para el contexto)
       const properties = await Property.find({ 
-        clientId: client._id,
         isActive: true 
-      }).limit(5);
+      }).limit(10);
 
       console.log(`📦 Propiedades: ${properties.length}`);
 
       const propList = properties.map(p => 
-        `${p.tipo} ${p.ubicacion} ${p.dormitorios}d U$S${p.precio}`
+        `${p.tipo} ${p.ubicacion} ${p.dormitorios}d U$S${p.precio.toLocaleString()}`
       ).join(', ');
 
       const systemPrompt = `Sos un agente de Fincas del Este (Uruguay).
 
-Propiedades: ${propList}
+Propiedades disponibles: ${propList}
+
+Total en base de datos: ${await Property.countDocuments()} propiedades
 
 Reglas:
 - Respuestas MUY cortas (1-2 lineas)
@@ -267,8 +254,8 @@ Reglas:
       await conversation.save();
 
       await sendWhatsAppMessage(
-        client.greenApiInstanceId,
-        client.greenApiToken,
+        process.env.GREEN_API_INSTANCE_ID,
+        process.env.GREEN_API_TOKEN,
         senderNumber,
         reply
       );
@@ -283,6 +270,10 @@ Reglas:
     }
   }
 });
+
+// ============================================
+// FUNCIÓN AUXILIAR
+// ============================================
 
 async function sendWhatsAppMessage(instanceId, token, phoneNumber, message) {
   try {
@@ -299,8 +290,12 @@ async function sendWhatsAppMessage(instanceId, token, phoneNumber, message) {
   }
 }
 
+// ============================================
+// INICIAR SERVIDOR
+// ============================================
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Server en puerto ${PORT}`);
-  console.log(`🔗 Webhook: https://agentefincasdeleste-production.up.railway.app/webhook/{instanceId}`);
+  console.log(`🔗 Webhook: https://agentefincasdeleste-production.up.railway.app/webhook/${process.env.GREEN_API_INSTANCE_ID}`);
 });
