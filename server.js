@@ -63,6 +63,7 @@ app.get('/test', (req, res) => {
 });
 
 // === ENDPOINT TEMPORAL DE ONBOARDING ===
+// Webhook de Green API
 app.post('/webhook/:instanceId', async (req, res) => {
   try {
     const { instanceId } = req.params;
@@ -70,7 +71,6 @@ app.post('/webhook/:instanceId', async (req, res) => {
 
     console.log('📨 Webhook recibido - instanceId:', instanceId);
     console.log('📨 Notification type:', notification.typeWebhook);
-    console.log('📨 Full notification:', JSON.stringify(notification, null, 2));
 
     // Responder rápido a Green API
     res.status(200).json({ received: true });
@@ -80,8 +80,18 @@ app.post('/webhook/:instanceId', async (req, res) => {
       console.log('✅ Es un mensaje entrante, procesando...');
       
       const messageData = notification.messageData;
-      const senderNumber = messageData.chatId.replace('@c.us', '');
-      const messageText = messageData.textMessageData?.textMessage || '';
+      const senderData = notification.senderData;
+      
+      // CORRECCIÓN: usar senderData.chatId
+      const senderNumber = senderData.chatId.replace('@c.us', '');
+      
+      // Extraer texto del mensaje
+      let messageText = '';
+      if (messageData.textMessageData?.textMessage) {
+        messageText = messageData.textMessageData.textMessage;
+      } else if (messageData.extendedTextMessageData?.text) {
+        messageText = messageData.extendedTextMessageData.text;
+      }
 
       console.log(`💬 Mensaje de ${senderNumber}: ${messageText}`);
 
@@ -89,7 +99,7 @@ app.post('/webhook/:instanceId', async (req, res) => {
       console.log('🔍 Buscando cliente con instanceId:', instanceId);
       
       const client = await Client.findOne({ 
-        greenApiInstanceId: instanceId,
+        greenApiInstanceId: instanceId.toString(),
         isActive: true 
       });
 
@@ -191,6 +201,7 @@ app.post('/webhook/:instanceId', async (req, res) => {
     console.error('❌ Error en webhook:', error);
     console.error('❌ Error stack:', error.stack);
   }
+});
 });
 // === FIN ENDPOINT TEMPORAL ===
 
