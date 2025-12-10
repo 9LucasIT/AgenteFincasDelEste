@@ -135,6 +135,61 @@ app.get('/admin/stats', async (req, res) => {
   }
 });
 
+// Obtener todas las propiedades
+app.get('/admin/properties', async (req, res) => {
+  try {
+    const properties = await Property.find().sort({ createdAt: -1 });
+    res.json({
+      success: true,
+      data: properties
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Agregar una propiedad individual
+app.post('/admin/properties', async (req, res) => {
+  try {
+    const property = new Property(req.body);
+    await property.save();
+    
+    res.json({
+      success: true,
+      message: 'Propiedad agregada correctamente',
+      data: property
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Eliminar una propiedad
+app.delete('/admin/properties/:id', async (req, res) => {
+  try {
+    await Property.findByIdAndDelete(req.params.id);
+    res.json({
+      success: true,
+      message: 'Propiedad eliminada'
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Borrar todas las propiedades
+app.delete('/admin/properties/clear', async (req, res) => {
+  try {
+    await Property.deleteMany({});
+    res.json({
+      success: true,
+      message: 'Todas las propiedades eliminadas'
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // ============================================
 // WEBHOOK DE GREEN API
 // ============================================
